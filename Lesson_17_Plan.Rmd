@@ -1,0 +1,151 @@
+---
+title: "Math 378 Lesson 17 Prep"
+author: "Lt Col Ken Horton"
+date: "February 27, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(fastR)
+require(Hmisc)
+require(MASS)
+require(ISLR)
+```
+
+\newcommand{\E}{\mbox{E}}
+\newcommand{\Var}{\mbox{Var}}
+\newcommand{\Cov}{\mbox{Cov}}
+\newcommand{\Prob}{\mbox{P}}
+\newcommand*\diff{\mathop{}\!\mathrm{d}}
+
+## Validation Set
+
+Recall in previous chapters when we've discussed using a test data set to evaluate the fit of a model. For example, in Lesson 14 lab, we compared logistic regression to LDA and QDA by withholding 100 observations, training the models on the remaining data, and then evaluating with respect to the withheld (test) data. 
+
+In this section, we will take a similar approach to estimate the test MSE of a model. The validation set method of estimating test MSE involves training the model on a subset of the data and computing the MSE when that model is used to predict the remaining observations.
+
+### Exercise
+
+Consider our beloved `Auto` dataset. Divide your data into a training set (250 observations) and a test set (the remainder). Let's build a model fitting `mpg` against `horsepower` on the training set. Calculate the mean squared error when applying this model to the test set. 
+
+```{r lesson17a}
+trainindex<-sample(nrow(Auto),250)
+traindata<-Auto[trainindex,]
+testdata<-Auto[-trainindex,]
+
+mymodel<-lm(mpg~horsepower,data=traindata)
+mean((predict(mymodel,testdata)-testdata$mpg)^2)
+```
+
+If we plot this data, we'll note that maybe a polynomial term might be appropriate. Let's fit this model again on the training data with a quadratic term. Determine the new test mse.  
+
+```{r lesson 17b}
+mymodel2<-lm(mpg~poly(horsepower,2),data=traindata)
+mean((predict(mymodel2,testdata)-testdata$mpg)^2)
+```
+
+It looks like test mse dropped a lot. Let's try higher order polynomials. 
+
+```{r lesson 17c}
+allmse<-rep(0,10)
+for(d in 1:10){
+  p.model<-lm(mpg~poly(horsepower,d),data=traindata)
+  allmse[d]<-mean((predict(p.model,testdata)-testdata$mpg)^2)
+}
+plot(allmse,type="l",xlab="Degree",ylab="Test MSE")
+```
+
+Your plot may look a little different than mine. This is because we have different training/test sets. Let's repeat this process for different training and test datasets. 
+
+```{r lesson17d}
+rtotal<-rep(0,10)
+for(i in 1:9){
+  trainindex<-sample(nrow(Auto),250)
+  traindata<-Auto[trainindex,]
+  testdata<-Auto[-trainindex,]
+
+  allmse<-rep(0,10)
+  for(d in 1:10){
+    p.model<-lm(mpg~poly(horsepower,d),data=traindata)
+    allmse[d]<-mean((predict(p.model,testdata)-testdata$mpg)^2)
+    }
+  if(i==1) plot(allmse,type="l",xlab="Degree",ylab="Test MSE",ylim=c(10,30))
+  if(i>1) lines(allmse,col=i)
+  rtotal<-rtotal+allmse
+}
+lines(rtotal/9,lwd=3)
+title("Validation Set")
+```
+
+Q: Based on this plot and what you know about the validation set method of estimating test MSE, what are some pros and cons of using this method? 
+
+Pros: Easily implemented, easily understood; in this case, would generally yield quadratic as best fit. 
+
+Cons: Very high variance; may overestimate the test error rate for the model
+
+## LOOCV
+
+Another approach is leave-one-out cross-validation (LOOCV).
+
+Q: How does LOOCV differ from validation set methodology?
+
+LOOCV sets aside a single observation for test, but repeats the procedure for all observations. 
+
+```{r lesson17e}
+all.loocv<-rep(0,10)
+for(p in 1:10){
+  loocv.err<-rep(0,nrow(Auto))
+  for(i in 1:nrow(Auto)){
+    lm.fit<-lm(mpg~poly(horsepower,p),data=Auto[-i,])
+    loocv.err[i]<-(Auto$mpg[i]-predict(lm.fit,Auto[i,]))^2
+  }
+  all.loocv[p]<-mean(loocv.err)    
+}
+
+plot(all.loocv,type="l",ylim=c(10,30),xlab="Degree",ylab="Test MSE")
+title("LOOCV")
+
+```
+
+Q: What are the pros and cons of LOOCV? 
+
+Pros: Note that there is only one way to conduct LOOCV, so there is no variability in your MSE estimates (within one dataset); simplifies nicely in the case of simple/polynomial regression, so fitting $n$ models is not necessary. 
+
+Cons: In non-simple cases, LOOCV can be computationally expensive. 
+
+## $k$-Fold Cross Validation
+
+$k$-Fold Cross Validation is a generalization of LOOCV. Instead of leaving out one observation at a time, we divide the data into $k$ subsets, and leave out each subset, one at a time. 
+
+```{r lesson17c}
+
+
+
+for(i in 1:9){
+  shufindex<-sample(nrow(Auto))
+  kfold<-split(shufindex,cut(seq_along(shufindex),5))
+  mses.all<-c()
+  for(p in 1:10){
+    mses<-c()
+    for(f in 1:5){
+      lm.fit<-lm(mpg~poly(horsepower,p),data=Auto[-kfold[[f]],])
+      mses<-c(mses,mean((Auto$mpg[kfold[[f]]]-predict(lm.fit,Auto[kfold[[f]],]))^2))
+    }
+  mses.all<-c(mses.all,mean(mses))
+  }
+
+  if(i==1) plot(mses.all,type="l",xlab="Degree",ylab="Test MSE",ylim=c(10,30))
+  if(i>1) lines(mses.all,col=i)
+  title("k-fold Cross Validation, k=5")
+}
+
+
+```
+
+Q: Based on this plot and what you know about $k$-fold CV, what are the pros and cons? 
+Pros: Faster; smaller variance than LOOCV, since there is less correlation between the fits within a $k$-fold CV. 
+
+Cons: May underestimate actual test variance; this might not be an issue if you only care about which model yields lowest MSE. 
+
+ 
